@@ -29,22 +29,43 @@ import com.dinglicom.util.SFTPFileUtil;
 public class RestatedService20170615 {
 	private static Log log = LogFactory.getLog(RestatedService20170615.class);
 	public static Properties readFilePath = DLUtils.getProperties("fileQueryConfig.properties");
-	public static String pathFile = readFilePath.getProperty("fgfile.path.output");//文件夹路径
+	/**
+	 * 文件夹路径
+	 */
+	public static String pathFile = readFilePath.getProperty("fgfile.path.output");
+
+	/**
+	 * 上传文件结果集
+	 */
+	public static List<String> upFileList = new ArrayList<String>();
+	
+	/**
+	 * 开始文件和结束文件时间间隔
+	 */
+	public static Long DATE_FILE_BEGIN_END = 0L;
+	
+	/**
+	 * sftp文件上传总共用时
+	 */
+	public static Long DATE_FILE_UP = 0L;
 	
 //	public static Properties readFtp = DLUtils.getProperties("ftp.properties");
-	public static List<String> upFileList = new ArrayList<String>();
     
 	public String read(final ServletInputStream inputStream) throws DocumentException, IOException, ParseException{
 		//1.解析XML
 		RestatedRequest restatedRequest = loadXml(inputStream);
+		
 		//2.读取.gc文件
-		readFileCHK(restatedRequest);
+		readFileGZ(restatedRequest);
 		
 		//3.通知
 		
-		
 		//4.上传
 		String str = upFileToFtp();
+		
+		log.debug(DATE_FILE_UP - DATE_FILE_BEGIN_END < 0?"sftp上传文件成功,用时:"+DATE_FILE_UP: "sftp上传超时,超时时间:"+(DATE_FILE_UP - DATE_FILE_BEGIN_END));
+		
+		
 		String state = str.equals(" ") ? "1" : "2";
 		String error = str.equals(" ") ? "SUCCESS" : str;
 		String resUpMsg = Up(restatedRequest.getId(), state, error);
@@ -66,17 +87,20 @@ public class RestatedService20170615 {
 	}
 
 	/**
-	 * 2.读取gz CHK文件
+	 * 2.读取gz文件
 	 * 
-	 * @return
+	 * @param restatedRequest
+	 * @return 超时时间 	若返回值 < 0 说明未超时 	反之为超时时间
 	 * @throws FileNotFoundException
-	 * @throws ParseException 
+	 * @throws ParseException
 	 */
-	public static void readFileCHK(RestatedRequest restatedRequest) throws FileNotFoundException, ParseException {
+	public static void readFileGZ(RestatedRequest restatedRequest) throws FileNotFoundException, ParseException {
 		
 		DateFormat df = new SimpleDateFormat("YYYYMMDDHHmmSS");
 		Long beginDate = df.parse(restatedRequest.getBeginFilename().split("_")[4]).getTime();//开始时间
 		Long endDate = df.parse(restatedRequest.getEndFilename().split("_")[4]).getTime();//结束时间
+		
+		DATE_FILE_BEGIN_END = endDate - beginDate;//开始文件时间与结束文件时间差
 		
 		//1.全部文件上传
 		//beginFilename及endFilename的名字相同（如均为LTE_SSS_HW_XXXX_YYYYMMDDHHMISS）并且fileName(单一文件)名为空，则需要重传该上报周期的所有文件
@@ -88,13 +112,16 @@ public class RestatedService20170615 {
 		}else if(StringUtils.isEmpty(restatedRequest.getFileName()) && StringUtils.isNotEmpty(restatedRequest.getBeginFilename()) && StringUtils.isNotEmpty(restatedRequest.getEndFilename()) && !restatedRequest.getBeginFilename().equals(restatedRequest.getEndFilename())){
 				List<String> listFileNameFileter = new FileRead2017061516(pathFile).ListFileNameFileter(".gz",beginDate,endDate);
 				upFileList.addAll(listFileNameFileter);
-				log.debug("ztt print log : RestatedService 85 Lin : 读出.gz文件的集合为："+ listFileNameFileter.size());
+				log.debug("ztt print log : RestatedService 114 Lin : 读出.gz文件的集合为："+ listFileNameFileter.size());
 		//3.单一文件上传	fileName不为空  并且  beginFilename及endFilename都为空
 		}else if(StringUtils.isNotEmpty(restatedRequest.getFileName()) && StringUtils.isEmpty(restatedRequest.getBeginFilename()) && StringUtils.isEmpty(restatedRequest.getEndFilename())){
 			List<String> listFileNameFileter = new FileRead2017061516(pathFile).ListFileNameFileter(restatedRequest.getFileName(),-2L,-2L);
 			upFileList.addAll(listFileNameFileter);
-			log.debug("ztt print log : RestatedService 102 Lin : fileName不为空,开始与结束文件名为空.则只上传一个文件.上传文件名为:"+restatedRequest.getFileName());
+			log.debug("ztt print log : RestatedService 119 Lin : fileName不为空,开始与结束文件名为空.则只上传一个文件.上传文件名为:"+restatedRequest.getFileName());
 		}
+		//上传总共用时-开始文件时间与结束文件时间差  > 0     说明在未在规定时间正常上传  超时
+//		return overTime > 0 ? overTime : -1L;
+		
 		/*if (restatedRequest.getBeginFilename().equals(restatedRequest.getEndFilename())) {
 			List<String> listFileNameFileter = new FileRead20170615(".gz").ListFileNameFileter(pathFile,restatedRequest);
 			upFileList.addAll(listFileNameFileter);
@@ -114,14 +141,14 @@ public class RestatedService20170615 {
 	 */
 	
 	public static String upFileToFtp() {
+		
 		String stateMsg = " ";
 		SFTPFileUtil sftp = new SFTPFileUtil("117.136.188.124",22,60000,"JSGPRS000","JTnj#386");
 		
 		String loginMsg = sftp.login();
 		if(!loginMsg.equals("SUCCESS")) return loginMsg;//如果登陆失败 返回登陆错误信息 
-		
+		Long beginDate = System.currentTimeMillis();//记录开始时间
 		Iterator<String> it = upFileList.iterator();
-		
 		while(it.hasNext()){
 			String entry = it.next();
 			String filePath = pathFile+"\\"+entry;/////////////////////////////////可能存在问题     路径需要答应出来看看
@@ -134,6 +161,8 @@ public class RestatedService20170615 {
 				return e.getMessage();
 			}
 		}
+		Long endDate = System.currentTimeMillis();//记录开始时间
+		DATE_FILE_UP = beginDate - endDate;
 		sftp.logout();
 		return stateMsg;
 	}
